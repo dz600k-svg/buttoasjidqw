@@ -24,7 +24,7 @@ concurrency:
 
 env:
   TDESKTOP_REF: v7.2.9
-  CACHE_PREFIX: win-x64-rel-v1
+  CACHE_PREFIX: win-x64-rel-v2
   PREPARE_PATH: Telegram/build/prepare/prepare.py
 
 jobs:
@@ -82,6 +82,41 @@ jobs:
           repository: telegramdesktop/tdesktop
           ref: ${{ env.TDESKTOP_REF }}
           path: ${{ env.TBUILD }}\tdesktop
+
+      - name: Исправление установки MSYS2.
+        shell: bash
+        run: |
+          base64 -d > "$RUNNER_TEMP/msys2.patch" <<'PATCH_EOF'
+          ZGlmZiAtLWdpdCBhL1RlbGVncmFtL2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weSBiL1RlbGVncmFt
+          L2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weQppbmRleCA3NTgxYmU1Li40YjViOGY5IDEwMDY0NAot
+          LS0gYS9UZWxlZ3JhbS9idWlsZC9wcmVwYXJlL3ByZXBhcmUucHkKKysrIGIvVGVsZWdyYW0vYnVp
+          bGQvcHJlcGFyZS9wcmVwYXJlLnB5CkBAIC04Myw3ICs4Myw3IEBAIGlmIG5vdCBvcy5wYXRoLmlz
+          ZGlyKG9zLnBhdGguam9pbih0aGlyZFBhcnR5RGlyLCBrZXlzTG9jKSk6CiAgICAgcGF0aGxpYi5Q
+          YXRoKG9zLnBhdGguam9pbih0aGlyZFBhcnR5RGlyLCBrZXlzTG9jKSkubWtkaXIocGFyZW50cz1U
+          cnVlLCBleGlzdF9vaz1UcnVlKQogCiBwYXRoUHJlZml4ZXMgPSBbCi0gICAgJ1RoaXJkUGFydHlc
+          XG1zeXM2NFxcbWluZ3c2NFxcYmluJywKKyAgICAnVGhpcmRQYXJ0eVxcbXN5czY0XFx1Y3J0NjRc
+          XGJpbicsCiAgICAgJ1RoaXJkUGFydHlcXGpvbScsCiAgICAgJ1RoaXJkUGFydHlcXGd5cCcsCiBd
+          IGlmIHdpbiBlbHNlIFsKQEAgLTQ3MSwxOCArNDcxLDE4IEBAIHdpbjoKICAgICBTRVQgQ0hFUkVf
+          SU5WT0tJTkc9ZW5hYmxlZF9mcm9tX2FyZ3VtZW50cwogICAgIFNFVCBNU1lTMl9QQVRIX1RZUEU9
+          aW5oZXJpdAogCi0gICAgcG93ZXJzaGVsbCAtQ29tbWFuZCAiaXdyIC1PdXRGaWxlIC4vbXN5czY0
+          LmV4ZSBodHRwczovL2dpdGh1Yi5jb20vbXN5czIvbXN5czItaW5zdGFsbGVyL3JlbGVhc2VzL2Rv
+          d25sb2FkLzIwMjUtMDgtMzAvbXN5czItYmFzZS14ODZfNjQtMjAyNTA4MzAuc2Z4LmV4ZSIKKyAg
+          ICBwb3dlcnNoZWxsIC1Db21tYW5kICJpd3IgLU91dEZpbGUgLi9tc3lzNjQuZXhlIGh0dHBzOi8v
+          Z2l0aHViLmNvbS9tc3lzMi9tc3lzMi1pbnN0YWxsZXIvcmVsZWFzZXMvZG93bmxvYWQvMjAyNi0w
+          OS0yNy9tc3lzMi1iYXNlLXg4Nl82NC0yMDI2MDkyNy5zZnguZXhlIgogICAgIG1zeXM2NC5leGUK
+          ICAgICBkZWwgbXN5czY0LmV4ZQogCiAgICAgYmFzaCAtYyAicGFjbWFuLWtleSAtLWluaXQ7IHBh
+          Y21hbi1rZXkgLS1wb3B1bGF0ZTsgcGFjbWFuIC1TeXUgLS1ub2NvbmZpcm0iCiAgICAgcGFjbWFu
+          IC1TeXUgLS1ub2NvbmZpcm0gXgogICAgICAgICBtYWtlIF4KLSAgICAgICAgbWluZ3ctdzY0LXg4
+          Nl82NC1kaWZmdXRpbHMgXgotICAgICAgICBtaW5ndy13NjQteDg2XzY0LWdwZXJmIF4KLSAgICAg
+          ICAgbWluZ3ctdzY0LXg4Nl82NC1uYXNtIF4KLSAgICAgICAgbWluZ3ctdzY0LXg4Nl82NC1wZXJs
+          IF4KLSAgICAgICAgbWluZ3ctdzY0LXg4Nl82NC1wa2djb25mCisgICAgICAgIG1pbmd3LXc2NC11
+          Y3J0LXg4Nl82NC1kaWZmdXRpbHMgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtZ3Bl
+          cmYgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtbmFzbSBeCisgICAgICAgIG1pbmd3
+          LXc2NC11Y3J0LXg4Nl82NC1wZXJsIF4KKyAgICAgICAgbWluZ3ctdzY0LXVjcnQteDg2XzY0LXBr
+          Z2NvbmYKICIiIiwgJ1RoaXJkUGFydHknKQogCiBzdGFnZSgncHl0aG9uJywgIiIiCg==
+          PATCH_EOF
+          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/msys2.patch" \
+            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/msys2.patch"
 
       - name: Первичная настройка.
         shell: bash
@@ -245,6 +280,9 @@ jobs:
           PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
           SAVED: ${{ steps.verify.outputs.cache-hit }}
         run: |
+          DONE_THIRD="$(ls "$TBUILD/ThirdParty/cache_keys" 2>/dev/null | tr '\n' ' ' || true)"
+          DONE_LIBS="$(ls "$LibrariesPath/cache_keys" 2>/dev/null | tr '\n' ' ' || true)"
+          FREE="$(df -h "$LibrariesPath" 2>/dev/null | tail -n 1 | awk '{ print $4 }' || true)"
           {
             echo "### Библиотеки, попытка ${{ matrix.attempt }}"
             if [ "$CACHE_HIT" == "true" ]; then
@@ -255,18 +293,23 @@ jobs:
               echo "Библиотеки собраны, но готовый кеш сохранить не удалось. Продолжение повторит сохранение."
             elif [ -n "$PREPARE_OUTCOME" ] && [ "$PREPARE_OUTCOME" != "skipped" ]; then
               echo "Библиотеки собраны не полностью (итог шага: $PREPARE_OUTCOME). Собранное сохраняется в кеш, продолжение начнёт с этого места."
-              for DIR in "$TBUILD/ThirdParty/cache_keys" "$LibrariesPath/cache_keys"; do
-                if [ -d "$DIR" ]; then
-                  echo
-                  echo "Готовые этапы (${DIR%/cache_keys}): $(ls "$DIR" | tr '\n' ' ')"
-                fi
-              done
               echo
-              echo "Свободное место на диске сборки ($TBUILD_DRIVE): $(df -h "$LibrariesPath" 2>/dev/null | tail -n 1 | awk '{ print $4 }')"
+              echo "Готовые этапы ThirdParty: ${DONE_THIRD:-нет}"
+              echo
+              echo "Готовые этапы Libraries: ${DONE_LIBS:-нет}"
+              echo
+              echo "Свободное место на диске сборки ($TBUILD_DRIVE): $FREE"
             else
               echo "Попытка остановилась до сборки библиотек, подробности в журнале шагов выше."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CACHE_HIT" != "true" ] && [ -n "$PREPARE_OUTCOME" ] && [ "$PREPARE_OUTCOME" != "skipped" ]; then
+            if [ "$PREPARE_OUTCOME" == "success" ]; then
+              echo "::notice::Попытка ${{ matrix.attempt }}: библиотеки собраны (кеш сохранён: ${SAVED:-нет})."
+            else
+              echo "::warning::Попытка ${{ matrix.attempt }}: библиотеки не собраны ($PREPARE_OUTCOME). Готово в ThirdParty: ${DONE_THIRD:-нет}; в Libraries: ${DONE_LIBS:-нет}; свободно на $TBUILD_DRIVE $FREE."
+            fi
+          fi
 
   build:
     name: Telegram
@@ -318,6 +361,41 @@ jobs:
           ref: ${{ env.TDESKTOP_REF }}
           submodules: recursive
           path: ${{ env.TBUILD }}\tdesktop
+
+      - name: Исправление установки MSYS2.
+        shell: bash
+        run: |
+          base64 -d > "$RUNNER_TEMP/msys2.patch" <<'PATCH_EOF'
+          ZGlmZiAtLWdpdCBhL1RlbGVncmFtL2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weSBiL1RlbGVncmFt
+          L2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weQppbmRleCA3NTgxYmU1Li40YjViOGY5IDEwMDY0NAot
+          LS0gYS9UZWxlZ3JhbS9idWlsZC9wcmVwYXJlL3ByZXBhcmUucHkKKysrIGIvVGVsZWdyYW0vYnVp
+          bGQvcHJlcGFyZS9wcmVwYXJlLnB5CkBAIC04Myw3ICs4Myw3IEBAIGlmIG5vdCBvcy5wYXRoLmlz
+          ZGlyKG9zLnBhdGguam9pbih0aGlyZFBhcnR5RGlyLCBrZXlzTG9jKSk6CiAgICAgcGF0aGxpYi5Q
+          YXRoKG9zLnBhdGguam9pbih0aGlyZFBhcnR5RGlyLCBrZXlzTG9jKSkubWtkaXIocGFyZW50cz1U
+          cnVlLCBleGlzdF9vaz1UcnVlKQogCiBwYXRoUHJlZml4ZXMgPSBbCi0gICAgJ1RoaXJkUGFydHlc
+          XG1zeXM2NFxcbWluZ3c2NFxcYmluJywKKyAgICAnVGhpcmRQYXJ0eVxcbXN5czY0XFx1Y3J0NjRc
+          XGJpbicsCiAgICAgJ1RoaXJkUGFydHlcXGpvbScsCiAgICAgJ1RoaXJkUGFydHlcXGd5cCcsCiBd
+          IGlmIHdpbiBlbHNlIFsKQEAgLTQ3MSwxOCArNDcxLDE4IEBAIHdpbjoKICAgICBTRVQgQ0hFUkVf
+          SU5WT0tJTkc9ZW5hYmxlZF9mcm9tX2FyZ3VtZW50cwogICAgIFNFVCBNU1lTMl9QQVRIX1RZUEU9
+          aW5oZXJpdAogCi0gICAgcG93ZXJzaGVsbCAtQ29tbWFuZCAiaXdyIC1PdXRGaWxlIC4vbXN5czY0
+          LmV4ZSBodHRwczovL2dpdGh1Yi5jb20vbXN5czIvbXN5czItaW5zdGFsbGVyL3JlbGVhc2VzL2Rv
+          d25sb2FkLzIwMjUtMDgtMzAvbXN5czItYmFzZS14ODZfNjQtMjAyNTA4MzAuc2Z4LmV4ZSIKKyAg
+          ICBwb3dlcnNoZWxsIC1Db21tYW5kICJpd3IgLU91dEZpbGUgLi9tc3lzNjQuZXhlIGh0dHBzOi8v
+          Z2l0aHViLmNvbS9tc3lzMi9tc3lzMi1pbnN0YWxsZXIvcmVsZWFzZXMvZG93bmxvYWQvMjAyNi0w
+          OS0yNy9tc3lzMi1iYXNlLXg4Nl82NC0yMDI2MDkyNy5zZnguZXhlIgogICAgIG1zeXM2NC5leGUK
+          ICAgICBkZWwgbXN5czY0LmV4ZQogCiAgICAgYmFzaCAtYyAicGFjbWFuLWtleSAtLWluaXQ7IHBh
+          Y21hbi1rZXkgLS1wb3B1bGF0ZTsgcGFjbWFuIC1TeXUgLS1ub2NvbmZpcm0iCiAgICAgcGFjbWFu
+          IC1TeXUgLS1ub2NvbmZpcm0gXgogICAgICAgICBtYWtlIF4KLSAgICAgICAgbWluZ3ctdzY0LXg4
+          Nl82NC1kaWZmdXRpbHMgXgotICAgICAgICBtaW5ndy13NjQteDg2XzY0LWdwZXJmIF4KLSAgICAg
+          ICAgbWluZ3ctdzY0LXg4Nl82NC1uYXNtIF4KLSAgICAgICAgbWluZ3ctdzY0LXg4Nl82NC1wZXJs
+          IF4KLSAgICAgICAgbWluZ3ctdzY0LXg4Nl82NC1wa2djb25mCisgICAgICAgIG1pbmd3LXc2NC11
+          Y3J0LXg4Nl82NC1kaWZmdXRpbHMgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtZ3Bl
+          cmYgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtbmFzbSBeCisgICAgICAgIG1pbmd3
+          LXc2NC11Y3J0LXg4Nl82NC1wZXJsIF4KKyAgICAgICAgbWluZ3ctdzY0LXVjcnQteDg2XzY0LXBr
+          Z2NvbmYKICIiIiwgJ1RoaXJkUGFydHknKQogCiBzdGFnZSgncHl0aG9uJywgIiIiCg==
+          PATCH_EOF
+          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/msys2.patch" \
+            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/msys2.patch"
 
       - name: Первичная настройка.
         shell: bash
@@ -590,3 +668,10 @@ jobs:
               fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$JOB_STATUS" == "success" ]; then
+            echo "::notice::Telegram.exe собран: ${RELEASE_URL:-раздел Artifacts на этой странице}"
+          elif [ -s msbuild-errors.log ]; then
+            head -n 6 msbuild-errors.log | tr -d '\r' | cut -c1-500 | mask | sed -e 's/%/%25/g' | while IFS= read -r LINE; do echo "::error::$LINE"; done || true
+          elif [ -s configure.log ]; then
+            grep -v '^[[:space:]]*$' configure.log | tail -n 6 | tr -d '\r' | cut -c1-500 | mask | sed -e 's/%/%25/g' | while IFS= read -r LINE; do echo "::error::$LINE"; done || true
+          fi
