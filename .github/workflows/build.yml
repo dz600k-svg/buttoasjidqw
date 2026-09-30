@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: telegram-custom-build
@@ -83,12 +84,12 @@ jobs:
           ref: ${{ env.TDESKTOP_REF }}
           path: ${{ env.TBUILD }}\tdesktop
 
-      - name: Исправление установки MSYS2.
+      - name: Исправления подготовки библиотек.
         shell: bash
         run: |
-          base64 -d > "$RUNNER_TEMP/msys2.patch" <<'PATCH_EOF'
+          base64 -d > "$RUNNER_TEMP/prepare.patch" <<'PATCH_EOF'
           ZGlmZiAtLWdpdCBhL1RlbGVncmFtL2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weSBiL1RlbGVncmFt
-          L2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weQppbmRleCA3NTgxYmU1Li40YjViOGY5IDEwMDY0NAot
+          L2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weQppbmRleCBjNzFkMjkzLi5mZDg5MjcxIDEwMDY0NAot
           LS0gYS9UZWxlZ3JhbS9idWlsZC9wcmVwYXJlL3ByZXBhcmUucHkKKysrIGIvVGVsZWdyYW0vYnVp
           bGQvcHJlcGFyZS9wcmVwYXJlLnB5CkBAIC04Myw3ICs4Myw3IEBAIGlmIG5vdCBvcy5wYXRoLmlz
           ZGlyKG9zLnBhdGguam9pbih0aGlyZFBhcnR5RGlyLCBrZXlzTG9jKSk6CiAgICAgcGF0aGxpYi5Q
@@ -113,10 +114,18 @@ jobs:
           Y3J0LXg4Nl82NC1kaWZmdXRpbHMgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtZ3Bl
           cmYgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtbmFzbSBeCisgICAgICAgIG1pbmd3
           LXc2NC11Y3J0LXg4Nl82NC1wZXJsIF4KKyAgICAgICAgbWluZ3ctdzY0LXVjcnQteDg2XzY0LXBr
-          Z2NvbmYKICIiIiwgJ1RoaXJkUGFydHknKQogCiBzdGFnZSgncHl0aG9uJywgIiIiCg==
+          Z2NvbmYKICIiIiwgJ1RoaXJkUGFydHknKQogCiBzdGFnZSgncHl0aG9uJywgIiIiCkBAIC0xNDUx
+          LDkgKzE0NTEsNiBAQCBkZXBlbmRzOnB5dGhvbi9TY3JpcHRzL2FjdGl2YXRlLmJhdAogICAgIG5p
+          bmphIC1DIG91dC9EZWJ1ZyVGb2xkZXJQb3N0Zml4JSBjb21tb24gY3Jhc2hfZ2VuZXJhdGlvbl9j
+          bGllbnQgZXhjZXB0aW9uX2hhbmRsZXIKIHJlbGVhc2U6CiAgICAgbmluamEgLUMgb3V0L1JlbGVh
+          c2UlRm9sZGVyUG9zdGZpeCUgY29tbW9uIGNyYXNoX2dlbmVyYXRpb25fY2xpZW50IGV4Y2VwdGlv
+          bl9oYW5kbGVyCi0gICAgY2QgdG9vbHNcXHdpbmRvd3NcXGR1bXBfc3ltcwotICAgIGd5cCBkdW1w
+          X3N5bXMuZ3lwIC0tZm9ybWF0PW1zdnMKLSAgICBtc2J1aWxkIC1tIGR1bXBfc3ltcy52Y3hwcm9q
+          IC9wcm9wZXJ0eTpDb25maWd1cmF0aW9uPVJlbGVhc2UgL3Byb3BlcnR5OlBsYXRmb3JtPSJ4NjQi
+          ICVUb29sc2V0UHJvcCUKIHdpbjoKICAgICBkZWFjdGl2YXRlCiBtYWM6Cg==
           PATCH_EOF
-          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/msys2.patch" \
-            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/msys2.patch"
+          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/prepare.patch" \
+            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/prepare.patch"
 
       - name: Первичная настройка.
         shell: bash
@@ -362,12 +371,12 @@ jobs:
           submodules: recursive
           path: ${{ env.TBUILD }}\tdesktop
 
-      - name: Исправление установки MSYS2.
+      - name: Исправления подготовки библиотек.
         shell: bash
         run: |
-          base64 -d > "$RUNNER_TEMP/msys2.patch" <<'PATCH_EOF'
+          base64 -d > "$RUNNER_TEMP/prepare.patch" <<'PATCH_EOF'
           ZGlmZiAtLWdpdCBhL1RlbGVncmFtL2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weSBiL1RlbGVncmFt
-          L2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weQppbmRleCA3NTgxYmU1Li40YjViOGY5IDEwMDY0NAot
+          L2J1aWxkL3ByZXBhcmUvcHJlcGFyZS5weQppbmRleCBjNzFkMjkzLi5mZDg5MjcxIDEwMDY0NAot
           LS0gYS9UZWxlZ3JhbS9idWlsZC9wcmVwYXJlL3ByZXBhcmUucHkKKysrIGIvVGVsZWdyYW0vYnVp
           bGQvcHJlcGFyZS9wcmVwYXJlLnB5CkBAIC04Myw3ICs4Myw3IEBAIGlmIG5vdCBvcy5wYXRoLmlz
           ZGlyKG9zLnBhdGguam9pbih0aGlyZFBhcnR5RGlyLCBrZXlzTG9jKSk6CiAgICAgcGF0aGxpYi5Q
@@ -392,10 +401,18 @@ jobs:
           Y3J0LXg4Nl82NC1kaWZmdXRpbHMgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtZ3Bl
           cmYgXgorICAgICAgICBtaW5ndy13NjQtdWNydC14ODZfNjQtbmFzbSBeCisgICAgICAgIG1pbmd3
           LXc2NC11Y3J0LXg4Nl82NC1wZXJsIF4KKyAgICAgICAgbWluZ3ctdzY0LXVjcnQteDg2XzY0LXBr
-          Z2NvbmYKICIiIiwgJ1RoaXJkUGFydHknKQogCiBzdGFnZSgncHl0aG9uJywgIiIiCg==
+          Z2NvbmYKICIiIiwgJ1RoaXJkUGFydHknKQogCiBzdGFnZSgncHl0aG9uJywgIiIiCkBAIC0xNDUx
+          LDkgKzE0NTEsNiBAQCBkZXBlbmRzOnB5dGhvbi9TY3JpcHRzL2FjdGl2YXRlLmJhdAogICAgIG5p
+          bmphIC1DIG91dC9EZWJ1ZyVGb2xkZXJQb3N0Zml4JSBjb21tb24gY3Jhc2hfZ2VuZXJhdGlvbl9j
+          bGllbnQgZXhjZXB0aW9uX2hhbmRsZXIKIHJlbGVhc2U6CiAgICAgbmluamEgLUMgb3V0L1JlbGVh
+          c2UlRm9sZGVyUG9zdGZpeCUgY29tbW9uIGNyYXNoX2dlbmVyYXRpb25fY2xpZW50IGV4Y2VwdGlv
+          bl9oYW5kbGVyCi0gICAgY2QgdG9vbHNcXHdpbmRvd3NcXGR1bXBfc3ltcwotICAgIGd5cCBkdW1w
+          X3N5bXMuZ3lwIC0tZm9ybWF0PW1zdnMKLSAgICBtc2J1aWxkIC1tIGR1bXBfc3ltcy52Y3hwcm9q
+          IC9wcm9wZXJ0eTpDb25maWd1cmF0aW9uPVJlbGVhc2UgL3Byb3BlcnR5OlBsYXRmb3JtPSJ4NjQi
+          ICVUb29sc2V0UHJvcCUKIHdpbjoKICAgICBkZWFjdGl2YXRlCiBtYWM6Cg==
           PATCH_EOF
-          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/msys2.patch" \
-            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/msys2.patch"
+          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/prepare.patch" \
+            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/prepare.patch"
 
       - name: Первичная настройка.
         shell: bash
@@ -674,4 +691,56 @@ jobs:
             head -n 6 msbuild-errors.log | tr -d '\r' | cut -c1-500 | mask | sed -e 's/%/%25/g' | while IFS= read -r LINE; do echo "::error::$LINE"; done || true
           elif [ -s configure.log ]; then
             grep -v '^[[:space:]]*$' configure.log | tail -n 6 | tr -d '\r' | cut -c1-500 | mask | sed -e 's/%/%25/g' | while IFS= read -r LINE; do echo "::error::$LINE"; done || true
+          fi
+
+      - name: Публикация журнала ошибок.
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIBS_READY: ${{ steps.lookup.outputs.cache-hit }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          mask() {
+            if [ -n "$API_HASH" ] && [ -n "$API_ID" ]; then
+              sed -e "s/$API_HASH/***/g" -e "s/$API_ID/***/g"
+            else
+              cat
+            fi
+          }
+          mkdir -p diag
+          if [ "$LIBS_READY" != "true" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=50" --jq '.jobs[] | select(.status == "completed") | .id' | tr -d '\r' | sort -n > diag/jobs.list || true
+            INDEX=0
+            while IFS= read -r ID <&3; do
+              INDEX=$((INDEX + 1))
+              if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$ID/logs" > diag/job.full 2> /dev/null; then
+                LINE="$(grep -n -m 1 -e '): FAILED' -e '##\[error\]' diag/job.full | cut -d: -f1 || true)"
+                if [ -n "$LINE" ]; then
+                  START=$((LINE > 150 ? LINE - 150 : 1))
+                  sed -n "${START},$((LINE + 5))p" diag/job.full | tr -d '\r' | cut -c1-600 | mask > "diag/libs-attempt-$INDEX.txt"
+                else
+                  tail -n 120 diag/job.full | tr -d '\r' | cut -c1-600 | mask > "diag/libs-attempt-$INDEX.txt"
+                fi
+              fi
+              rm -f diag/job.full
+            done 3< diag/jobs.list
+          fi
+          if [ -s msbuild-errors.log ]; then
+            head -n 300 msbuild-errors.log | tr -d '\r' | cut -c1-600 | mask > diag/msbuild-errors.txt
+          fi
+          if [ -s configure.log ]; then
+            tail -n 200 configure.log | tr -d '\r' | cut -c1-600 | mask > diag/configure.txt
+          fi
+          rm -f diag/jobs.list
+          if ls diag/*.txt > /dev/null 2>&1; then
+            TAG="logs-${{ github.run_number }}-${{ github.run_attempt }}"
+            gh release create "$TAG" diag/*.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "Build log excerpt, run ${{ github.run_number }}" \
+              --notes "Diagnostic excerpt of a failed build. Safe to delete."
+            echo "::notice::Журнал ошибок: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
           fi
