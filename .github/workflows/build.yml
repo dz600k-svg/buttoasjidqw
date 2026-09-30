@@ -1,0 +1,592 @@
+# Сборка своего Telegram Desktop под Windows x64.
+#
+# Берёт официальные исходники Telegram Desktop (тег TDESKTOP_REF), накладывает
+# встроенный патч (кнопка «удалить у всех + заблокировать») и собирает
+# оптимизированный Telegram.exe. Библиотеки собираются один раз и кешируются.
+#
+# Нужны два секрета репозитория: API_ID и API_HASH (my.telegram.org).
+
+name: Telegram custom build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: telegram-custom-build
+  cancel-in-progress: false
+
+env:
+  TDESKTOP_REF: v7.2.9
+  CACHE_PREFIX: win-x64-rel-v1
+  PREPARE_PATH: Telegram/build/prepare/prepare.py
+
+jobs:
+
+  libs:
+    name: Библиотеки (попытка ${{ matrix.attempt }})
+    runs-on: windows-latest
+    timeout-minutes: 355
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        attempt: [1, 2]
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Проверка API_ID и API_HASH.
+        shell: bash
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          fail() {
+            echo "::error::$1"
+            echo "### $1" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          if [ -z "$API_ID" ] || [ -z "$API_HASH" ]; then
+            fail "Не заданы секреты API_ID и API_HASH: Settings -> Secrets and variables -> Actions -> New repository secret."
+          fi
+          if ! [[ "$API_ID" =~ ^[0-9]+$ ]]; then
+            fail "API_ID должен состоять только из цифр."
+          fi
+          if ! [[ "$API_HASH" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            fail "API_HASH должен состоять из 32 символов 0-9 и a-f."
+          fi
+
+      - name: Подготовка папок.
+        run: |
+          set TBUILD_DRIVE=%GITHUB_WORKSPACE:~0,2%
+          echo Build tree: %TBUILD_DRIVE%\TBuild
+          mkdir %TBUILD_DRIVE%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %TBUILD_DRIVE%\TBuild
+          echo TBUILD_DRIVE=%TBUILD_DRIVE%>>%GITHUB_ENV%
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Исходники Telegram Desktop.
+        uses: actions/checkout@v7
+        with:
+          repository: telegramdesktop/tdesktop
+          ref: ${{ env.TDESKTOP_REF }}
+          path: ${{ env.TBUILD }}\tdesktop
+
+      - name: Первичная настройка.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/tdesktop/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/tdesktop/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "$TBUILD_DRIVE" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: Проверка кеша библиотек.
+        id: lookup
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-done-${{ env.CACHE_KEY }}
+          lookup-only: true
+
+      - name: Освобождение места на диске.
+        if: steps.lookup.outputs.cache-hit != 'true' && env.TBUILD_DRIVE == 'C:'
+        shell: pwsh
+        run: |
+          $tools = $env:AGENT_TOOLSDIRECTORY
+          $patterns = @(
+            'C:\Android',
+            'C:\Program Files (x86)\Android',
+            'C:\Julia',
+            'C:\Miniconda',
+            'C:\Program Files\PostgreSQL',
+            'C:\Program Files\R',
+            'C:\Program Files\Microsoft SQL Server',
+            'C:\Program Files (x86)\Epic Games',
+            'C:\Program Files (x86)\IIS Express',
+            'C:\Program Files (x86)\Inno Setup*',
+            'C:\Program Files (x86)\pipx*',
+            'C:\SeleniumWebDrivers',
+            'C:\selenium',
+            'C:\aliyun-cli',
+            'C:\cf-cli',
+            'C:\tools\Apache*',
+            'C:\tools\nginx*',
+            'C:\tools\php'
+          )
+          if ($tools) {
+            $patterns += @(
+              "$tools\CodeQL",
+              "$tools\go",
+              "$tools\Java_*_jdk",
+              "$tools\Ruby",
+              "$tools\stack"
+            )
+          }
+          $jobs = @()
+          foreach ($pattern in $patterns) {
+            foreach ($item in @(Get-Item -Path $pattern -ErrorAction SilentlyContinue)) {
+              Write-Host "Removing $($item.FullName)"
+              $jobs += Start-Job -ScriptBlock {
+                param($path)
+                cmd /c rmdir /s /q "$path" 2>&1 | Out-Null
+              } -ArgumentList $item.FullName
+            }
+          }
+          if ($jobs.Count -gt 0) {
+            $null = Wait-Job -Job $jobs -Timeout 900
+          }
+          Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Format-Table Name, Used, Free
+          exit 0
+
+      - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
+        name: Окружение компилятора MSVC.
+        if: steps.lookup.outputs.cache-hit != 'true'
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: Источники NuGet.
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Восстановление незаконченного кеша.
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-done-${{ env.CACHE_KEY }}
+          restore-keys: |
+            ${{ env.CACHE_PREFIX }}-part-${{ env.CACHE_KEY }}-
+            ${{ env.CACHE_PREFIX }}-done-
+            ${{ env.CACHE_PREFIX }}-part-
+
+      - name: Сборка библиотек (самый долгий шаг, 3-5 часов).
+        id: prepare
+        if: steps.lookup.outputs.cache-hit != 'true'
+        timeout-minutes: 285
+        continue-on-error: true
+        run: |
+          %TBUILD%\tdesktop\Telegram\build\prepare\win.bat silent
+
+      - name: Остановка незавершённых процессов сборки.
+        if: always() && steps.lookup.outputs.cache-hit != 'true' && (steps.prepare.outcome == 'failure' || steps.prepare.outcome == 'cancelled')
+        run: |
+          for %%p in (python.exe cl.exe link.exe lib.exe ml64.exe rc.exe MSBuild.exe ninja.exe jom.exe nmake.exe cmake.exe make.exe sh.exe bash.exe perl.exe nasm.exe git.exe cargo.exe rustc.exe mspdbsrv.exe vctip.exe) do taskkill /F /T /IM %%p >nul 2>&1
+          exit /b 0
+
+      - name: Удаление промежуточных файлов.
+        if: always() && steps.lookup.outputs.cache-hit != 'true' && steps.prepare.outcome != 'skipped'
+        shell: bash
+        run: |
+          find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete || true
+
+      - name: Сохранение кеша библиотек.
+        if: steps.lookup.outputs.cache-hit != 'true' && steps.prepare.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-done-${{ env.CACHE_KEY }}
+
+      - name: Проверка сохранённого кеша.
+        id: verify
+        if: steps.lookup.outputs.cache-hit != 'true' && steps.prepare.outcome == 'success'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-done-${{ env.CACHE_KEY }}
+          lookup-only: true
+
+      - name: Сохранение незаконченного кеша.
+        if: always() && steps.lookup.outputs.cache-hit != 'true' && (steps.prepare.outcome == 'failure' || steps.prepare.outcome == 'cancelled' || (steps.prepare.outcome == 'success' && steps.verify.outputs.cache-hit != 'true'))
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-part-${{ env.CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.attempt }}
+
+      - name: Отчёт.
+        if: always()
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.lookup.outputs.cache-hit }}
+          PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
+          SAVED: ${{ steps.verify.outputs.cache-hit }}
+        run: |
+          {
+            echo "### Библиотеки, попытка ${{ matrix.attempt }}"
+            if [ "$CACHE_HIT" == "true" ]; then
+              echo "Готовые библиотеки уже есть в кеше, пересборка не нужна."
+            elif [ "$PREPARE_OUTCOME" == "success" ] && [ "$SAVED" == "true" ]; then
+              echo "Библиотеки собраны и сохранены в кеш."
+            elif [ "$PREPARE_OUTCOME" == "success" ]; then
+              echo "Библиотеки собраны, но готовый кеш сохранить не удалось. Продолжение повторит сохранение."
+            elif [ -n "$PREPARE_OUTCOME" ] && [ "$PREPARE_OUTCOME" != "skipped" ]; then
+              echo "Библиотеки собраны не полностью (итог шага: $PREPARE_OUTCOME). Собранное сохраняется в кеш, продолжение начнёт с этого места."
+              for DIR in "$TBUILD/ThirdParty/cache_keys" "$LibrariesPath/cache_keys"; do
+                if [ -d "$DIR" ]; then
+                  echo
+                  echo "Готовые этапы (${DIR%/cache_keys}): $(ls "$DIR" | tr '\n' ' ')"
+                fi
+              done
+              echo
+              echo "Свободное место на диске сборки ($TBUILD_DRIVE): $(df -h "$LibrariesPath" 2>/dev/null | tail -n 1 | awk '{ print $4 }')"
+            else
+              echo "Попытка остановилась до сборки библиотек, подробности в журнале шагов выше."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Telegram
+    needs: libs
+    if: ${{ !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 355
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Проверка API_ID и API_HASH.
+        shell: bash
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          fail() {
+            echo "::error::$1"
+            echo "### $1" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          if [ -z "$API_ID" ] || [ -z "$API_HASH" ]; then
+            fail "Не заданы секреты API_ID и API_HASH: Settings -> Secrets and variables -> Actions -> New repository secret."
+          fi
+          if ! [[ "$API_ID" =~ ^[0-9]+$ ]]; then
+            fail "API_ID должен состоять только из цифр."
+          fi
+          if ! [[ "$API_HASH" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            fail "API_HASH должен состоять из 32 символов 0-9 и a-f."
+          fi
+
+      - name: Подготовка папок.
+        run: |
+          set TBUILD_DRIVE=%GITHUB_WORKSPACE:~0,2%
+          echo Build tree: %TBUILD_DRIVE%\TBuild
+          mkdir %TBUILD_DRIVE%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %TBUILD_DRIVE%\TBuild
+          echo TBUILD_DRIVE=%TBUILD_DRIVE%>>%GITHUB_ENV%
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Исходники Telegram Desktop.
+        uses: actions/checkout@v7
+        with:
+          repository: telegramdesktop/tdesktop
+          ref: ${{ env.TDESKTOP_REF }}
+          submodules: recursive
+          path: ${{ env.TBUILD }}\tdesktop
+
+      - name: Первичная настройка.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/tdesktop/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/tdesktop/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "$TBUILD_DRIVE" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: Проверка кеша библиотек.
+        id: lookup
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-done-${{ env.CACHE_KEY }}
+          lookup-only: true
+
+      - name: Библиотеки готовы?
+        if: steps.lookup.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          MESSAGE="Библиотеки не собраны за две попытки (подробности в отчётах попыток). Нажмите Re-run all jobs: уже собранное возьмётся из кеша."
+          echo "::error::$MESSAGE"
+          echo "### $MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Патч с кнопкой.
+        shell: bash
+        run: |
+          base64 -d > "$RUNNER_TEMP/custom.patch" <<'PATCH_EOF'
+          ZGlmZiAtLWdpdCBhL1RlbGVncmFtL1NvdXJjZUZpbGVzL2NoYXRfaGVscGVycy9jaGF0X2hlbHBl
+          cnMuc3R5bGUgYi9UZWxlZ3JhbS9Tb3VyY2VGaWxlcy9jaGF0X2hlbHBlcnMvY2hhdF9oZWxwZXJz
+          LnN0eWxlCmluZGV4IDNmNTVjMzMuLjE5ZmM4YmEgMTAwNjQ0Ci0tLSBhL1RlbGVncmFtL1NvdXJj
+          ZUZpbGVzL2NoYXRfaGVscGVycy9jaGF0X2hlbHBlcnMuc3R5bGUKKysrIGIvVGVsZWdyYW0vU291
+          cmNlRmlsZXMvY2hhdF9oZWxwZXJzL2NoYXRfaGVscGVycy5zdHlsZQpAQCAtMTM3MSw2ICsxMzcx
+          LDEwIEBAIGhpc3RvcnlHaWZ0VG9Vc2VyOiBJY29uQnV0dG9uKGhpc3RvcnlBdHRhY2gpIHsKIAlp
+          Y29uOiBpY29uIHt7ICJjaGF0L2lucHV0X2dpZnQiLCBoaXN0b3J5Q29tcG9zZUljb25GZyB9fTsK
+          IAlpY29uT3ZlcjogaWNvbiB7eyAiY2hhdC9pbnB1dF9naWZ0IiwgaGlzdG9yeUNvbXBvc2VJY29u
+          RmdPdmVyIH19OwogfQoraGlzdG9yeURlbGV0ZUFuZEJsb2NrOiBJY29uQnV0dG9uKGhpc3RvcnlB
+          dHRhY2gpIHsKKwlpY29uOiBpY29uIHt7ICJtZW51L2Jsb2NrIiwgYXR0ZW50aW9uQnV0dG9uRmcg
+          fX07CisJaWNvbk92ZXI6IGljb24ge3sgIm1lbnUvYmxvY2siLCBhdHRlbnRpb25CdXR0b25GZ092
+          ZXIgfX07Cit9CiBoaXN0b3J5U3VnZ2VzdFBvc3RUb2dnbGU6IEljb25CdXR0b24oaGlzdG9yeUF0
+          dGFjaCkgewogCWljb246IGljb257eyAiY2hhdC9pbnB1dF9wYWlkIiwgaGlzdG9yeUNvbXBvc2VJ
+          Y29uRmcgfX07CiAJaWNvbk92ZXI6IGljb257eyAiY2hhdC9pbnB1dF9wYWlkIiwgaGlzdG9yeUNv
+          bXBvc2VJY29uRmdPdmVyIH19OwpkaWZmIC0tZ2l0IGEvVGVsZWdyYW0vU291cmNlRmlsZXMvaGlz
+          dG9yeS9oaXN0b3J5X3dpZGdldC5jcHAgYi9UZWxlZ3JhbS9Tb3VyY2VGaWxlcy9oaXN0b3J5L2hp
+          c3Rvcnlfd2lkZ2V0LmNwcAppbmRleCBjZGRkZDczLi44MzEzZmQ5IDEwMDY0NAotLS0gYS9UZWxl
+          Z3JhbS9Tb3VyY2VGaWxlcy9oaXN0b3J5L2hpc3Rvcnlfd2lkZ2V0LmNwcAorKysgYi9UZWxlZ3Jh
+          bS9Tb3VyY2VGaWxlcy9oaXN0b3J5L2hpc3Rvcnlfd2lkZ2V0LmNwcApAQCAtNyw2ICs3LDcgQEAg
+          aHR0cHM6Ly9naXRodWIuY29tL3RlbGVncmFtZGVza3RvcC90ZGVza3RvcC9ibG9iL21hc3Rlci9M
+          RUdBTAogKi8KICNpbmNsdWRlICJoaXN0b3J5L2hpc3Rvcnlfd2lkZ2V0LmgiCiAKKyNpbmNsdWRl
+          ICJhcGkvYXBpX2Jsb2NrZWRfcGVlcnMuaCIKICNpbmNsdWRlICJhcGkvYXBpX2NvbXBvc2Vfd2l0
+          aF9haS5oIgogI2luY2x1ZGUgImFwaS9hcGlfZWRpdGluZy5oIgogI2luY2x1ZGUgImFwaS9hcGlf
+          Ym90LmgiCkBAIC0zMzI4LDYgKzMzMjksNyBAQCB2b2lkIEhpc3RvcnlXaWRnZXQ6OnNob3dIaXN0
+          b3J5KAogCQlyZWZyZXNoU3VnZ2VzdFBvc3RUb2dnbGUoKTsKIAkJcmVmcmVzaFNjaGVkdWxlZFRv
+          Z2dsZSgpOwogCQlyZWZyZXNoU2VuZEdpZnRUb2dnbGUoKTsKKwkJcmVmcmVzaERlbGV0ZUFuZEJs
+          b2NrVG9nZ2xlKCk7CiAJCXJlZnJlc2hTZW5kQXNUb2dnbGUoKTsKIAogCQlpZiAoX3Nob3dBdE1z
+          Z0lkID09IFNob3dBdFVucmVhZE1zZ0lkKSB7CkBAIC0zOTI0LDYgKzM5MjYsNDkgQEAgdm9pZCBI
+          aXN0b3J5V2lkZ2V0OjpyZWZyZXNoU2VuZEdpZnRUb2dnbGUoKSB7CiAJfQogfQogCit2b2lkIEhp
+          c3RvcnlXaWRnZXQ6OnJlZnJlc2hEZWxldGVBbmRCbG9ja1RvZ2dsZSgpIHsKKwljb25zdCBhdXRv
+          IHVzZXIgPSBfcGVlciA/IF9wZWVyLT5hc1VzZXIoKSA6IG51bGxwdHI7CisJY29uc3QgYXV0byBo
+          YXMgPSB1c2VyCisJCSYmICF1c2VyLT5pc1NlbGYoKQorCQkmJiAhdXNlci0+aXNTZXJ2aWNlVXNl
+          cigpCisJCSYmICF1c2VyLT5pc1JlcGxpZXNDaGF0KCkKKwkJJiYgIXVzZXItPmlzVmVyaWZ5Q29k
+          ZXMoKTsKKwlpZiAoIV9kZWxldGVBbmRCbG9jayAmJiBoYXMpIHsKKwkJX2RlbGV0ZUFuZEJsb2Nr
+          LmNyZWF0ZSh0aGlzLCBzdDo6aGlzdG9yeURlbGV0ZUFuZEJsb2NrKTsKKwkJX2RlbGV0ZUFuZEJs
+          b2NrLT5zZXRBY2Nlc3NpYmxlTmFtZSgKKwkJCXRyOjpsbmdfcHJvZmlsZV9ibG9ja191c2VyKHRy
+          Ojpub3cpKTsKKwkJX2RlbGV0ZUFuZEJsb2NrLT5hZGRDbGlja0hhbmRsZXIoWz1dIHsKKwkJCWRl
+          bGV0ZUNoYXRBbmRCbG9ja1VzZXIoKTsKKwkJfSk7CisJCW9yZGVyV2lkZ2V0cygpOyAvLyBSYWlz
+          ZSBkcmFnIGFyZWFzIHRvIHRoZSB0b3AuCisJfSBlbHNlIGlmIChfZGVsZXRlQW5kQmxvY2sgJiYg
+          IWhhcykgeworCQlfZGVsZXRlQW5kQmxvY2suZGVzdHJveSgpOworCX0KK30KKwordm9pZCBIaXN0
+          b3J5V2lkZ2V0OjpkZWxldGVDaGF0QW5kQmxvY2tVc2VyKCkgeworCWNvbnN0IGF1dG8gdXNlciA9
+          IF9wZWVyID8gX3BlZXItPmFzVXNlcigpIDogbnVsbHB0cjsKKwlpZiAoIXVzZXIpIHsKKwkJcmV0
+          dXJuOworCX0KKwljb25zdCBhdXRvIHNlc3Npb24gPSAmdXNlci0+c2Vzc2lvbigpOworCWNvbnN0
+          IGF1dG8gcmV2b2tlID0gdXNlci0+Y2FuUmV2b2tlRnVsbEhpc3RvcnkoKTsKKwljb25zdCBhdXRv
+          IGRvbmUgPSB0cjo6bG5nX25ld19jb250YWN0X2Jsb2NrX2RvbmUoCisJCXRyOjpub3csCisJCWx0
+          X3VzZXIsCisJCXVzZXItPnNob3J0TmFtZSgpKTsKKwkvLyBDbG9zaW5nIHRoZSBjaGF0IG1heSBk
+          ZXN0cm95IHRoaXMgd2lkZ2V0LCBzbyBmaW5pc2ggd2l0aG91dCBpdC4KKwljcmw6Om9uX21haW4o
+          c2Vzc2lvbiwgWz1dIHsKKwkJY29uc3QgYXV0byBhY2NvdW50ID0gbm90X251bGwoJnNlc3Npb24t
+          PmFjY291bnQoKSk7CisJCUNvcmU6OkFwcCgpLmNsb3NlQ2hhdEZyb21XaW5kb3dzKHVzZXIpOwor
+          CQlzZXNzaW9uLT5hcGkoKS5kZWxldGVDb252ZXJzYXRpb24odXNlciwgcmV2b2tlKTsKKwkJc2Vz
+          c2lvbi0+YXBpKCkuYmxvY2tlZFBlZXJzKCkuYmxvY2sodXNlcik7CisJCWlmIChjb25zdCBhdXRv
+          IHByaW1hcnkgPSBDb3JlOjpBcHAoKS53aW5kb3dGb3IoYWNjb3VudCkpIHsKKwkJCXByaW1hcnkt
+          PnNob3dUb2FzdChkb25lKTsKKwkJfQorCX0pOworfQorCiB2b2lkIEhpc3RvcnlXaWRnZXQ6OmFw
+          cGx5U3VnZ2VzdE9wdGlvbnMoCiAJCVN1Z2dlc3RPcHRpb25zIHN1Z2dlc3QsCiAJCUhpc3RvcnlW
+          aWV3OjpTdWdnZXN0TW9kZSBtb2RlKSB7CkBAIC00MTYxLDYgKzQyMDYsOSBAQCB2b2lkIEhpc3Rv
+          cnlXaWRnZXQ6OnVwZGF0ZUNvbnRyb2xzVmlzaWJpbGl0eSgpIHsKIAkJX2tiU2Nyb2xsLT5oaWRl
+          KCk7CiAJCV9maWVsZEJhckNhbmNlbC0+aGlkZSgpOwogCQlfYXR0YWNoVG9nZ2xlLT5oaWRlKCk7
+          CisJCWlmIChfZGVsZXRlQW5kQmxvY2spIHsKKwkJCV9kZWxldGVBbmRCbG9jay0+aGlkZSgpOwor
+          CQl9CiAJCWlmIChfcmVwbGFjZU1lZGlhKSB7CiAJCQlfcmVwbGFjZU1lZGlhLT5oaWRlKCk7CiAJ
+          CX0KQEAgLTQyNTAsNiArNDI5OCw5IEBAIHZvaWQgSGlzdG9yeVdpZGdldDo6dXBkYXRlQ29udHJv
+          bHNWaXNpYmlsaXR5KCkgewogCQl9IGVsc2UgewogCQkJX2F0dGFjaFRvZ2dsZS0+c2hvdygpOwog
+          CQl9CisJCWlmIChfZGVsZXRlQW5kQmxvY2spIHsKKwkJCV9kZWxldGVBbmRCbG9jay0+c2hvdygp
+          OworCQl9CiAJCWlmIChfYm90TWVudS5idXR0b24pIHsKIAkJCV9ib3RNZW51LmJ1dHRvbi0+c2hv
+          dygpOwogCQl9CkBAIC00MzM1LDYgKzQzODYsOSBAQCB2b2lkIEhpc3RvcnlXaWRnZXQ6OnVwZGF0
+          ZUNvbnRyb2xzVmlzaWJpbGl0eSgpIHsKIAkJX211dGVVbm11dGUtPmhpZGUoKTsKIAkJX3JlcG9y
+          dE1lc3NhZ2VzLT5oaWRlKCk7CiAJCV9hdHRhY2hUb2dnbGUtPmhpZGUoKTsKKwkJaWYgKF9kZWxl
+          dGVBbmRCbG9jaykgeworCQkJX2RlbGV0ZUFuZEJsb2NrLT5oaWRlKCk7CisJCX0KIAkJaWYgKF9z
+          aWxlbnQpIHsKIAkJCV9zaWxlbnQtPmhpZGUoKTsKIAkJfQpAQCAtNzQxOSw2ICs3NDczLDEwIEBA
+          IHZvaWQgSGlzdG9yeVdpZGdldDo6bW92ZUZpZWxkQ29udHJvbHMoKSB7CiAJfQogCV9hdHRhY2hU
+          b2dnbGUtPm1vdmVUb0xlZnQobGVmdCwgYnV0dG9uc0JvdHRvbSk7CiAJbGVmdCArPSBfYXR0YWNo
+          VG9nZ2xlLT53aWR0aCgpOworCWlmIChfZGVsZXRlQW5kQmxvY2spIHsKKwkJX2RlbGV0ZUFuZEJs
+          b2NrLT5tb3ZlVG9MZWZ0KGxlZnQsIGJ1dHRvbnNCb3R0b20pOworCQlsZWZ0ICs9IF9kZWxldGVB
+          bmRCbG9jay0+d2lkdGgoKTsKKwl9CiAJaWYgKF9zZW5kQXMpIHsKIAkJX3NlbmRBcy0+bW92ZVRv
+          TGVmdChsZWZ0LCBidXR0b25zQm90dG9tKTsKIAkJbGVmdCArPSBfc2VuZEFzLT53aWR0aCgpOwpA
+          QCAtNzUwOSw2ICs3NTY3LDkgQEAgdm9pZCBIaXN0b3J5V2lkZ2V0Ojp1cGRhdGVGaWVsZFNpemUo
+          KSB7CiAJaWYgKF9zZW5kQXMpIHsKIAkJZmllbGRXaWR0aCAtPSBfc2VuZEFzLT53aWR0aCgpOwog
+          CX0KKwlpZiAoX2RlbGV0ZUFuZEJsb2NrKSB7CisJCWZpZWxkV2lkdGggLT0gX2RlbGV0ZUFuZEJs
+          b2NrLT53aWR0aCgpOworCX0KIAlpZiAoa2JTaG93U2hvd24pIHsKIAkJZmllbGRXaWR0aCAtPSBf
+          Ym90S2V5Ym9hcmRTaG93LT53aWR0aCgpOwogCX0KZGlmZiAtLWdpdCBhL1RlbGVncmFtL1NvdXJj
+          ZUZpbGVzL2hpc3RvcnkvaGlzdG9yeV93aWRnZXQuaCBiL1RlbGVncmFtL1NvdXJjZUZpbGVzL2hp
+          c3RvcnkvaGlzdG9yeV93aWRnZXQuaAppbmRleCA5Mjc3ZDc1Li5hMzAxZjFlIDEwMDY0NAotLS0g
+          YS9UZWxlZ3JhbS9Tb3VyY2VGaWxlcy9oaXN0b3J5L2hpc3Rvcnlfd2lkZ2V0LmgKKysrIGIvVGVs
+          ZWdyYW0vU291cmNlRmlsZXMvaGlzdG9yeS9oaXN0b3J5X3dpZGdldC5oCkBAIC03NzMsNiArNzcz
+          LDggQEAgcHJpdmF0ZToKIAl2b2lkIHNldHVwU2NoZWR1bGVkVG9nZ2xlKCk7CiAJdm9pZCByZWZy
+          ZXNoU2NoZWR1bGVkVG9nZ2xlKCk7CiAJdm9pZCByZWZyZXNoU2VuZEdpZnRUb2dnbGUoKTsKKwl2
+          b2lkIHJlZnJlc2hEZWxldGVBbmRCbG9ja1RvZ2dsZSgpOworCXZvaWQgZGVsZXRlQ2hhdEFuZEJs
+          b2NrVXNlcigpOwogCXZvaWQgcmVmcmVzaFN1Z2dlc3RQb3N0VG9nZ2xlKCk7CiAJdm9pZCBhcHBs
+          eVN1Z2dlc3RPcHRpb25zKAogCQlTdWdnZXN0T3B0aW9ucyBzdWdnZXN0LApAQCAtOTM4LDYgKzk0
+          MCw3IEBAIHByaXZhdGU6CiAJb2JqZWN0X3B0cjxVaTo6SWNvbkJ1dHRvbj4gX2JvdENvbW1hbmRT
+          dGFydDsKIAlvYmplY3RfcHRyPFVpOjpJY29uQnV0dG9uPiBfdG9nZ2xlU3VnZ2VzdFBvc3QgPSB7
+          IG51bGxwdHIgfTsKIAlvYmplY3RfcHRyPFVpOjpJY29uQnV0dG9uPiBfZ2lmdFRvVXNlciA9IHsg
+          bnVsbHB0ciB9OworCW9iamVjdF9wdHI8VWk6Okljb25CdXR0b24+IF9kZWxldGVBbmRCbG9jayA9
+          IHsgbnVsbHB0ciB9OwogCW9iamVjdF9wdHI8VWk6OlNpbGVudFRvZ2dsZT4gX3NpbGVudCA9IHsg
+          bnVsbHB0ciB9OwogCW9iamVjdF9wdHI8VWk6Okljb25CdXR0b24+IF9zY2hlZHVsZWQgPSB7IG51
+          bGxwdHIgfTsKIAlzdGQ6OnVuaXF1ZV9wdHI8SGlzdG9yeVZpZXc6OkNvbnRyb2xzOjpUVExCdXR0
+          b24+IF90dGxJbmZvOwo=
+          PATCH_EOF
+          git -C "$TBUILD/tdesktop" apply --verbose "$RUNNER_TEMP/custom.patch" \
+            || git -C "$TBUILD/tdesktop" apply --verbose --ignore-whitespace "$RUNNER_TEMP/custom.patch"
+          git -C "$TBUILD/tdesktop" status --short
+
+      - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
+        name: Окружение компилятора MSVC.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: Источники NuGet.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Восстановление кеша библиотек.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TBUILD }}\ThirdParty
+            ${{ env.TBUILD }}\Libraries
+          key: ${{ env.CACHE_PREFIX }}-done-${{ env.CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Проверка библиотек.
+        run: |
+          %TBUILD%\tdesktop\Telegram\build\prepare\win.bat silent
+
+      - name: Удаление промежуточных файлов.
+        shell: bash
+        run: |
+          find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete || true
+
+      - name: Конфигурация проекта.
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          cd /d %TBUILD%\tdesktop\Telegram
+
+          call configure.bat ^
+          x64 ^
+          -D TDESKTOP_API_ID=%API_ID% ^
+          -D TDESKTOP_API_HASH=%API_HASH% ^
+          -D CMAKE_CONFIGURATION_TYPES=MinSizeRel ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= > "%GITHUB_WORKSPACE%\configure.log" 2>&1
+
+          set CONFIGURE_RESULT=%errorlevel%
+          type "%GITHUB_WORKSPACE%\configure.log"
+          exit /b %CONFIGURE_RESULT%
+
+      - name: Сборка Telegram (1-2 часа).
+        run: |
+          cd /d %TBUILD%\tdesktop\Telegram
+
+          cmake --build ..\out --config MinSizeRel --parallel -- /fl "/flp:LogFile=%GITHUB_WORKSPACE%\msbuild-errors.log;ErrorsOnly"
+
+      - name: Архив с результатом.
+        env:
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          set OUT=%TBUILD%\tdesktop\out\MinSizeRel
+          mkdir artifact
+          move %OUT%\Telegram.exe artifact\
+          if errorlevel 1 exit /b 1
+          7z a -t7z -mx=5 -mhe=on "-p%API_HASH%" Telegram-custom.7z .\artifact\Telegram.exe
+          if errorlevel 1 exit /b 1
+
+      - uses: actions/upload-artifact@v7
+        name: Загрузка результата.
+        with:
+          name: Telegram-custom
+          path: Telegram-custom.7z
+          retention-days: 30
+
+      - name: Публикация в Releases.
+        id: release
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}-${{ github.run_attempt }}"
+          gh release create "$TAG" Telegram-custom.7z \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Telegram ${TDESKTOP_REF} custom, build ${{ github.run_number }}" \
+            --notes "Telegram Desktop ${TDESKTOP_REF} + delete-and-block button. Archive password: your API_HASH."
+          echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Отчёт.
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          mask() {
+            if [ -n "$API_HASH" ] && [ -n "$API_ID" ]; then
+              sed -e "s/$API_HASH/***/g" -e "s/$API_ID/***/g"
+            else
+              cat
+            fi
+          }
+          {
+            if [ "$JOB_STATUS" == "success" ]; then
+              echo "### Готово: Telegram.exe собран"
+              if [ -n "$RELEASE_URL" ]; then
+                echo "Скачать: $RELEASE_URL (файл Telegram-custom.7z)."
+              else
+                echo "Скачать: раздел Artifacts на этой странице (Telegram-custom)."
+              fi
+              echo
+              echo "Пароль архива: ваш API_HASH."
+            else
+              echo "### Сборка Telegram не удалась"
+              if [ -s msbuild-errors.log ]; then
+                echo
+                echo "Первые ошибки компиляции:"
+                echo '```'
+                head -n 40 msbuild-errors.log | cut -c1-600 | mask
+                echo '```'
+              elif [ -s configure.log ]; then
+                echo
+                echo "Конец журнала конфигурации:"
+                echo '```'
+                tail -n 40 configure.log | cut -c1-600 | mask
+                echo '```'
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
