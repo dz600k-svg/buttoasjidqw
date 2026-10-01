@@ -802,6 +802,14 @@ jobs:
         run: |
           find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete || true
 
+      - uses: al-cheb/configure-pagefile-action@9b6da52fb72a3c6147c1aad2df22d8d905681adc
+        name: Файл подкачки для компилятора.
+        continue-on-error: true
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+
       - name: Конфигурация проекта.
         env:
           API_ID: ${{ secrets.API_ID }}
@@ -825,6 +833,20 @@ jobs:
           cd /d %TBUILD%\tdesktop\Telegram
 
           cmake --build ..\out --config MinSizeRel --parallel -- /fl "/flp:LogFile=%GITHUB_WORKSPACE%\msbuild-errors.log;ErrorsOnly"
+          if not errorlevel 1 exit /b 0
+
+          rem The compiler sometimes runs out of memory on the huge resource files.
+          rem The build is incremental, a retry compiles only what is left.
+          echo ::warning::First build pass failed, retrying the rest with two compiler processes.
+          copy /y "%GITHUB_WORKSPACE%\msbuild-errors.log" "%GITHUB_WORKSPACE%\msbuild-errors-pass1.log" > nul
+          set _CL_=/MP2
+          cmake --build ..\out --config MinSizeRel --parallel 1 -- /fl "/flp:LogFile=%GITHUB_WORKSPACE%\msbuild-errors.log;ErrorsOnly"
+          if not errorlevel 1 exit /b 0
+
+          echo ::warning::Second build pass failed, retrying the rest with one compiler process.
+          copy /y "%GITHUB_WORKSPACE%\msbuild-errors.log" "%GITHUB_WORKSPACE%\msbuild-errors-pass2.log" > nul
+          set _CL_=/MP1
+          cmake --build ..\out --config MinSizeRel --parallel 1 -- /fl "/flp:LogFile=%GITHUB_WORKSPACE%\msbuild-errors.log;ErrorsOnly"
 
       - name: Архив с результатом.
         env:
@@ -947,6 +969,11 @@ jobs:
           if [ -s msbuild-errors.log ]; then
             head -n 300 msbuild-errors.log | tr -d '\r' | cut -c1-600 | mask > diag/msbuild-errors.txt
           fi
+          for PASS in 1 2; do
+            if [ -s "msbuild-errors-pass$PASS.log" ]; then
+              head -n 300 "msbuild-errors-pass$PASS.log" | tr -d '\r' | cut -c1-600 | mask > "diag/msbuild-errors-pass$PASS.txt"
+            fi
+          done
           if [ -s configure.log ]; then
             tail -n 200 configure.log | tr -d '\r' | cut -c1-600 | mask > diag/configure.txt
           fi
